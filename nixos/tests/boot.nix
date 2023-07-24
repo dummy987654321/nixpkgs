@@ -145,4 +145,57 @@ in {
         machine.shutdown()
       '';
     };
+    ubootNetboot =
+    let
+      script = pkgs.runCommand "ubootscript" {
+        nativeBuildInputs = with pkgs.buildPackages; [ubootTools];
+        passAsFile = [ "source" ];
+        source = ''
+          tftp $kernel_addr_r bzImage
+          tftp $ramdisk_addr_r initrd.zst
+          setenv bootargs init=${config.system.build.toplevel}/init initrd=initrd ${toString config.boot.kernelParams}
+          zboot $kernel_addr_r 0 $ramdisk_addr_r ''${filesize}
+          '';
+      } ''
+        mkdir -p $out
+        mkimage -A x86_64 -O linux -T script -C none -a 0 -e 0 -n "Boot Script NixOS ${config.system.nixos.label}" -d "$sourcePath" "$out/boot.scr.uimg"
+      '';
+      config = (import ../lib/eval-config.nix {
+        system = null;
+        modules = [
+          ../modules/installer/netboot/netboot.nix
+          ../modules/testing/test-instrumentation.nix
+          { key = "serial"; }
+          ({lib, ...}: {
+            nixpkgs.localSystem = {
+              inherit system;
+            };
+          })
+        ];
+      }).config;
+      ubootNetbootDir = pkgs.symlinkJoin {
+        name = "ubootNetbootDir";
+        paths = [
+          config.system.build.netbootRamdisk
+          config.system.build.kernel
+          script
+        ];
+      };
+      machineConfig = pythonDict ({
+        qemuBinary = qemu-common.qemuBinary pkgs.qemu_test;
+        bios = "${pkgs.ubootQemuX86}/u-boot.rom";
+        qemuFlags = "-boot order=n -m 2000";
+        netBackendArgs = "tftp=${ubootNetbootDir}";
+      });
+    in
+      makeTest {
+        name = "uboot-netboot";
+        nodes = { };
+        testScript = ''
+            machine = create_machine(${machineConfig})
+            machine.start()
+            machine.wait_for_unit("multi-user.target")
+            machine.shutdown()
+          '';
+      };
 }

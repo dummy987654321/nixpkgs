@@ -53,6 +53,8 @@ in
     compressorArgs = _compressorArgsReal;
   };
 
+  inherit extension prepend;
+
   passAsFile = ["contents"];
   contents = lib.concatMapStringsSep "\n" ({ object, symlink, ... }: "${object}\n${if symlink == null then "" else symlink}") contents + "\n";
 
